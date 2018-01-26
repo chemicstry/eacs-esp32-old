@@ -1,0 +1,16 @@
+[submodule "components/arduino"]
+	path = components/arduino
+	url = https://github.com/espressif/arduino-esp32.git
+[submodule "components/arduinoLibs/arduinoWebSockets"]
+	path = components/arduinoLibs/arduinoWebSockets
+	url = https://github.com/Links2004/arduinoWebSockets
+	branch = esp32
+[submodule "components/arduinoLibs/SimpleTimer"]
+	path = components/arduinoLibs/SimpleTimer
+	url = https://github.com/schinken/SimpleTimer
+[submodule "components/arduinoLibs/ArduinoJson"]
+	path = components/arduinoLibs/ArduinoJson
+	url = https://github.com/bblanchon/ArduinoJson
+[submodule "components/arduinoLibs/PN532Extended"]
+	path = components/arduinoLibs/PN532Extended
+	url = https://github.com/chemicstry/PN532Extended

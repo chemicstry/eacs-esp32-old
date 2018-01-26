@@ -5,7 +5,7 @@
 #include "ArduinoJson.h"
 #include "JsonEventInterface.h"
 #include "RFIDService.h"
-#include "src/SimpleTimer/SimpleTimer.h"
+#include "SimpleTimer.h"
 
 class WebsocketService : public JsonEventInterface
 {

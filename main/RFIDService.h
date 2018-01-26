@@ -2,7 +2,7 @@
 #define _RFIDSERVICE_H_
 
 #include "JsonEventInterface.h"
-#include "src/SimpleTimer/SimpleTimer.h"
+#include "SimpleTimer.h"
 
 #define NEW_TARGET_TIMEOUT 5000
 

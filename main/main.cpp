@@ -1,20 +1,15 @@
-#include "src/arduinoWebSockets/WebSocketsClient.h"
-#include "src/SimpleTimer/SimpleTimer.h"
+#include "WebSocketsClient.h"
+#include "SimpleTimer.h"
 #include "WebsocketService.h"
 #include "PN532Instance.h"
 
-#define USE_ETH
-//#define USE_WIFI
-
-#ifdef USE_WIFI
-#define WIFI_SSID "ssid"
-#define WIFI_PASS "password"
+#if CONFIG_USE_WIFI
 #include <WiFi.h>
 #include <WiFiMulti.h>
 WiFiMulti wifiMulti;
 #endif
 
-#ifdef USE_ETH
+#if CONFIG_USE_ETH
 #include <ETH.h>
 #endif
 
@@ -54,6 +49,7 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
 void WiFiEvent(WiFiEvent_t event)
 {
     switch (event) {
+#if CONFIG_USE_ETH
         case SYSTEM_EVENT_ETH_START:
             Serial.println("ETH Started");
             //set eth hostname here
@@ -80,6 +76,7 @@ void WiFiEvent(WiFiEvent_t event)
         case SYSTEM_EVENT_ETH_STOP:
             Serial.println("ETH Stopped");
             break;
+#endif
         default:
             break;
     }
@@ -92,21 +89,24 @@ void setup() {
     // Start PN532
     NFC.begin();
 
-    uint32_t versiondata = NFC.getFirmwareVersion();
-    if (! versiondata) {
+    GetFirmwareVersionResponse version;
+    if (!NFC.GetFirmwareVersion(version)) {
         Serial.print("Didn't find PN53x board");
         ESP.restart();
     }
     
-    // Print PN532 chip data
-    Serial.print("Found chip PN5"); Serial.println((versiondata>>24) & 0xFF, HEX); 
-    Serial.print("Firmware ver. "); Serial.print((versiondata>>16) & 0xFF, DEC); 
-    Serial.print('.'); Serial.println((versiondata>>8) & 0xFF, DEC);
+    // Got ok data, print it out!
+    Serial.print("Found chip PN5"); Serial.println(version.IC, HEX);
+    Serial.print("Firmware version: "); Serial.println(version.Ver, DEC);
+    Serial.print("Firmware revision: "); Serial.println(version.Rev, DEC);
+    Serial.print("Supports ISO18092: "); Serial.println((bool)version.Support.ISO18092);
+    Serial.print("Supports ISO14443 Type A: "); Serial.println((bool)version.Support.ISO14443_TYPEA);
+    Serial.print("Supports ISO14443 Type B: "); Serial.println((bool)version.Support.ISO14443_TYPEB);
     
     // Set the max number of retry attempts to read from a card
     // This prevents us from waiting forever for a card, which is
     // the default behaviour of the PN532.
-    NFC.setPassiveActivationRetries(0xFF);
+    NFC.SetPassiveActivationRetries(0xFF);
     
     // configure board to read RFID tags
     NFC.SAMConfig();
@@ -114,24 +114,28 @@ void setup() {
     // Enable wifi event callbacks
     WiFi.onEvent(WiFiEvent);
 
-#ifdef USE_WIFI
-    wifiMulti.addAP(WIFI_SSID, WIFI_PASS);
+    #if CONFIG_USE_WIFI
+        wifiMulti.addAP(CONFIG_WIFI_SSID, CONFIG_WIFI_PASSWORD);
 
-    Serial.println("Connecting Wifi...");
-    if(wifiMulti.run() == WL_CONNECTED) {
-        Serial.println("");
-        Serial.println("WiFi connected");
-        Serial.println("IP address: ");
-        Serial.println(WiFi.localIP());
-    }
-#endif
+        Serial.println("Connecting Wifi...");
+        if(wifiMulti.run() == WL_CONNECTED) {
+            Serial.println("");
+            Serial.println("WiFi connected");
+            Serial.println("IP address: ");
+            Serial.println(WiFi.localIP());
+        }
+    #endif
 
-#ifdef USE_ETH
-    ETH.begin();
-#endif
+    #if CONFIG_USE_ETH
+        ETH.begin();
+    #endif
 
-    //webSocket.beginSSL("rfidtest.gaben.win", 443);
-    webSocket.begin("78.63.23.25", 25687);
+    #if CONFIG_SERVER_SSL
+        webSocket.beginSSL(CONFIG_SERVER_HOST, CONFIG_SERVER_PORT);
+    #else
+        webSocket.begin(CONFIG_SERVER_HOST, CONFIG_SERVER_PORT);
+    #endif
+
     webSocket.onEvent(webSocketEvent);
   
     // Bind upstream callback to relay data to websocket

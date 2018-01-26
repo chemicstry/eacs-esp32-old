@@ -30,7 +30,7 @@ void RFIDService::OnTagTransceive(const JsonObject& args)
     BinaryData buf = HexStringToBinaryData(hexstr);
 
     // Create interface with tag
-    TagInterface tif = NFCEXT.CreateTagInterface(_target);
+    TagInterface tif = NFC.CreateTagInterface(_target);
 
     // Send
     if (tif.Write(buf))
@@ -81,7 +81,7 @@ void RFIDService::OnReleaseTarget(const JsonObject& args)
 void RFIDService::AcquireNewTarget()
 {
     // Finds nearby ISO14443 Type A tags
-    InListPassiveTargetResponse resp = NFCEXT.InListPassiveTarget(1, BRTY_106KBPS_TYPE_A);
+    InListPassiveTargetResponse resp = NFC.InListPassiveTarget(1, BRTY_106KBPS_TYPE_A);
 
     // For parsing response data
     ByteBuffer buf(resp.TgData);
