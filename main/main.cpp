@@ -1,7 +1,8 @@
 #include "WebSocketsClient.h"
 #include "SimpleTimer.h"
-#include "WebsocketService.h"
+#include "ServiceManager.h"
 #include "PN532Instance.h"
+#include "JSONRPC/Client.h"
 
 #if CONFIG_USE_WIFI
 #include <WiFi.h>
@@ -14,7 +15,7 @@ WiFiMulti wifiMulti;
 #endif
 
 JsonBidirectionalDataInterface jif;
-WebsocketService wservice(jif.Downstream);
+ServiceManager svcmgr(jif.Downstream);
 
 WebSocketsClient webSocket;
 
@@ -23,7 +24,7 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
         case WStype_DISCONNECTED:
         {
             Serial.printf("[WSc] Disconnected!\n");
-            wservice.Reset();
+            svcmgr.Reset();
             break;
         }
         case WStype_CONNECTED:
@@ -82,9 +83,22 @@ void WiFiEvent(WiFiEvent_t event)
     }
 }
 
+JSONRPC::Client c;
+
 void setup() {
     Serial.begin(115200);
     Serial.setDebugOutput(true);
+
+    c.SetHandler(JSONRPC::JSONTransportHandler([](const json& o) {
+        json resp;
+        resp["jsonrpc"] = "2.0";
+        resp["id"] = o["id"];
+        resp["result"] = "labas as krabas";
+        c.HandleData(resp);
+    }));
+
+    std::future<json> o = c.CallAsync("test", 1, "2");
+    Serial.println(o.get().dump().c_str());
 
     // Start PN532
     NFC.begin();
@@ -106,7 +120,7 @@ void setup() {
     // Set the max number of retry attempts to read from a card
     // This prevents us from waiting forever for a card, which is
     // the default behaviour of the PN532.
-    NFC.SetPassiveActivationRetries(0xFF);
+    NFC.SetPassiveActivationRetries(0x00);
     
     // configure board to read RFID tags
     NFC.SAMConfig();
@@ -148,5 +162,5 @@ void setup() {
 
 void loop() {
     webSocket.loop();
-    wservice.Update();
+    svcmgr.Update();
 }

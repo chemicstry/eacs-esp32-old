@@ -1,5 +1,5 @@
-#ifndef _WEBSOCKETSERVICE_H_
-#define _WEBSOCKETSERVICE_H_
+#ifndef _SERVICEMANAGER_H_
+#define _SERVICEMANAGER_H_
 
 #include "JsonDataInterface.h"
 #include "ArduinoJson.h"
@@ -7,10 +7,10 @@
 #include "RFIDService.h"
 #include "SimpleTimer.h"
 
-class WebsocketService : public JsonEventInterface
+class ServiceManager : public JsonEventInterface
 {
 public:
-    WebsocketService(JsonDataInterface& dataif);
+    ServiceManager(JsonDataInterface& dataif);
     void OnServerHello(const JsonObject& args);
     void OnUnlock(const JsonObject& args);
 

@@ -7,5 +7,4 @@
 # please read the ESP-IDF documents if you need to do this.
 #
 
-COMPONENT_SRCDIRS := . JSONRPC
-CXXFLAGS += -Wno-switch -std=c++11 -fexceptions -D_GLIBCXX_USE_C99
+COMPONENT_ADD_INCLUDEDIRS := .
