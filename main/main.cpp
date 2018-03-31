@@ -1,5 +1,4 @@
 #include "WebSocketsClient.h"
-#include "SimpleTimer.h"
 #include "PN532Instance.h"
 #include "JSONRPC/JSONRPC.h"
 #include "JSONRPC/Node.h"
