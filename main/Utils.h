@@ -3,6 +3,7 @@
 
 #include "ByteBuffer.h"
 #include <string>
+#include "esp_log.h"
 
 inline std::string BinaryDataToHexString(const BinaryData& data)
 {
@@ -32,5 +33,32 @@ inline BinaryData HexStringToBinaryData(const std::string& str)
 
     return data;
 }
+
+#if CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS
+inline void PrintTaskStats(void* parameter)
+{
+    static char taskInfo[1000];
+
+    while (1)
+    {
+        // Get task status
+        vTaskList(taskInfo);
+        ESP_LOGI("STATS", "Task Info:\nTask            State   Prio    Stack    Num\n%s", taskInfo);
+
+        // 5 seconds
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
+    }
+}
+
+inline void EnableTaskStats()
+{
+    xTaskCreate(PrintTaskStats, "TaskStats", 2048, NULL, 1, NULL);
+}
+#else
+inline void EnableTaskStats()
+{
+    // Do nothing
+}
+#endif
 
 #endif
