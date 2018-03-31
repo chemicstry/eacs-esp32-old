@@ -1,13 +1,35 @@
 #include "Client.h"
+#include "JSONRPC.h"
 #include <vector>
 
 using namespace JSONRPC;
+using namespace std::placeholders;
 
-Client::Client(): _id(0)
+Client::Client(Transport* transport): _id(0), _timeout(JSON_RPC_CLIENT_TIMEOUT)
 {
+    if (transport)
+        setTransport(transport);
+    
+    // Start timeout thread
+    _timeoutThreadHandle = std::thread(std::bind(&Client::_timeoutThread, this, _1), _timeoutThreadExitSignal.get_future());
 }
 
-void Client::HandleData(const json& j)
+Client::~Client()
+{
+    // Send exit signal
+    _timeoutThreadExitSignal.set_value();
+
+    // Wait for exit
+    _timeoutThreadHandle.join();
+}
+
+void Client::setTransport(Transport* transport)
+{
+    _transport = transport;
+    _transport->setDownstreamHandler(std::bind(&Client::handleDownstream, this, _1));
+}
+
+void Client::handleDownstream(const json& j)
 {
     auto jsonit = j.find("jsonrpc");
     if (jsonit == j.end() || *jsonit != "2.0")
@@ -15,24 +37,58 @@ void Client::HandleData(const json& j)
 
     uint32_t id = j["id"];
 
-    // Find promise
-    auto it = _promises.find(id);
-    if (it == _promises.end())
-        throw PromiseNotFoundException();
+    PromisePtr promise;
+    {
+        std::lock_guard<std::mutex> l(_requestsMutex);
 
-    auto promise = it->second;
-    _promises.erase(it);
+        // Find promise
+        auto it = _requests.find(id);
+        if (it == _requests.end())
+            throw RequestNotFoundException();
+
+        promise = it->second.promise;
+        _requests.erase(it);
+    }
 
     auto errorit = j.find("error");
     if (errorit != j.end()) {
         auto error = *errorit;
 
         try {
-            throw JSONRPCErrorException(error["code"], error["message"], error["data"]);
-        } catch (const JSONRPCErrorException& e) {
-            promise->set_exception(std::current_exception());
+            if (error.find("data") != error.end()) {
+                throw RPCMethodException(error["code"], error["message"], error["data"]);
+            } else {
+                throw RPCMethodException(error["code"], error["message"]);
+            }
+        } catch (const RPCMethodException& e) {
+            promise->set_exception(make_exception_ptr(e));
         }
     } else
         promise->set_value(j["result"]);
+}
+
+void Client::_timeoutThread(std::future<void> f)
+{
+    while (f.wait_for(std::chrono::milliseconds(JSON_RPC_CLIENT_TIMEOUT_CHECK_INTERVAL)) == std::future_status::timeout)
+	{
+        std::lock_guard<std::mutex> l(_requestsMutex);
+
+        for (auto it = _requests.cbegin(); it != _requests.cend();)
+        {
+            system_clock::duration diff = system_clock::now() - it->second.start;
+    
+            if (duration_cast<milliseconds>(diff).count() > _timeout)
+            {
+                try {
+                    throw TimeoutException();
+                } catch (const TimeoutException& e) {
+                    it->second.promise->set_exception(make_exception_ptr(e));
+                }
+
+                _requests.erase(it++);
+            } else
+                ++it;
+        }
+    }
 }
 

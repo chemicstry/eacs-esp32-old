@@ -1,25 +1,25 @@
 #ifndef _JSONRPCCLIENT_H_
 #define _JSONRPCCLIENT_H_
 
+#include "JSONRPC.h"
 #include "Transport.h"
 #include <json.hpp>
 #include <string>
 #include <future>
 #include <map>
+#include <mutex>
+#include <atomic>
+#include "esp_log.h"
 
 using json = nlohmann::json;
+using namespace std::chrono;
+
+#define JSON_RPC_CLIENT_TIMEOUT 2000
+#define JSON_RPC_CLIENT_TIMEOUT_CHECK_INTERVAL 500
 
 namespace JSONRPC
 {
-    class InvalidJSONRPCException : public std::exception
-    {
-        const char* what() const throw()
-        {
-            return "Invalid JSON RPC format";
-        }
-    };
-
-    class PromiseNotFoundException : public std::exception
+    class RequestNotFoundException : public std::exception
     {
         const char* what() const throw()
         {
@@ -27,44 +27,45 @@ namespace JSONRPC
         }
     };
 
-    class JSONRPCErrorException : public std::exception
-    {
-        int32_t _code;
-        std::string _message;
-        json _data;
-
-    public:
-        JSONRPCErrorException(int32_t code, const std::string& message, const json& data): _code(code), _message(message), _data(data)
-        {
-        }
-
-        int32_t code() const { return _code; }
-        json data() const { return _data; }
-        const char* what() const throw()
-        {
-            return _message.c_str();
-        }
-    };
-
     typedef std::shared_ptr<std::promise<json>> PromisePtr;
     typedef std::future<json> Future;
 
-    class Client : public Transport
+    struct Request
+    {
+        Request(PromisePtr _promise, system_clock::time_point _start):
+            promise(_promise), start(_start) {}
+        PromisePtr promise;
+        system_clock::time_point start;
+    };
+
+    class Client
     {
     public:
-        Client();
+        Client(Transport* transport = nullptr);
+        ~Client();
+
+        void setTransport(Transport* transport);
 
         template<typename ...Args>
-        json Call(std::string method, Args&&... args);
+        json call(std::string method, Args&&... args);
         template<typename ...Args>
-        Future CallAsync(std::string method, Args&&... args);
+        Future callAsync(std::string method, Args&&... args);
 
         // Handle incoming json data
-        void HandleData(const json& j);
+        void handleDownstream(const json& j);
 
     private:
-        uint32_t _id;
-        std::map<uint32_t, PromisePtr> _promises;
+        std::atomic<uint32_t> _id;
+        std::map<uint32_t, Request> _requests;
+        std::mutex _requestsMutex;
+
+        Transport* _transport;
+
+        // Timeout thread checks for timed out requests
+        uint32_t _timeout;
+        std::thread _timeoutThreadHandle;
+        std::promise<void> _timeoutThreadExitSignal;
+        void _timeoutThread(std::future<void> f);
     };
 
     template<typename Arg>
@@ -81,7 +82,13 @@ namespace JSONRPC
     }
 
     template<typename ...Args>
-    inline Future Client::CallAsync(std::string method, Args&&... args)
+    inline json Client::call(std::string method, Args&&... args)
+    {
+        return callAsync(method, std::forward<Args>(args)...).get();
+    }
+
+    template<typename ...Args>
+    inline Future Client::callAsync(std::string method, Args&&... args)
     {
         uint32_t id = _id++;
         json j;
@@ -95,10 +102,17 @@ namespace JSONRPC
 
         // Save promise for matching response message to request
         auto promise = std::make_shared<std::promise<json>>();
-        _promises[id] = promise;
+
+        {
+            std::lock_guard<std::mutex> l(_requestsMutex);
+            _requests.insert(std::make_pair(id, Request(promise, system_clock::now())));
+        }
 
         // Send formatted JSON RPC message
-        Send(j);
+        if (_transport)
+            _transport->sendUpstream(j);
+        else
+            throw NoTransportException();
 
         return promise->get_future();
     }

@@ -17,27 +17,21 @@ namespace JSONRPC
         }
     };
 
-    typedef std::function<void(const json&)> JSONTransportHandler;
-    typedef std::function<void(const std::string&)> StringTransportHandler;
+    typedef std::function<void(const json&)> TransportHandler;
 
     class Transport
     {
     public:
         // Registers a function which handles outgoing json data
-        void SetHandler(const JSONTransportHandler& handler);
-        void SetHandler(const StringTransportHandler& handler);
+        void setUpstreamHandler(const TransportHandler& handler);
+        void setDownstreamHandler(const TransportHandler& handler);
 
         // Handle incoming json data
-        virtual void HandleData(const json& j) = 0;
-        void HandleData(const std::string& s);
-
-    protected:
-        // Send data to transport
-        void Send(const json& j);
+        void sendUpstream(const json& j);
+        void sendDownstream(const json& j);
 
     private:
-        JSONTransportHandler _JSONHandler;
-        StringTransportHandler _StringHandler;
+        TransportHandler _upstream, _downstream;
     };
 }
 

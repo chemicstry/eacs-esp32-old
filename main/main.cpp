@@ -1,166 +1,164 @@
 #include "WebSocketsClient.h"
 #include "SimpleTimer.h"
-#include "ServiceManager.h"
 #include "PN532Instance.h"
-#include "JSONRPC/Client.h"
+#include "JSONRPC/JSONRPC.h"
+#include "JSONRPC/Node.h"
+#include "JSONRPC/WebsocketTransport.h"
+#include "Utils.h"
+#include "esp_log.h"
+#include <thread>
+#include "Arduino.h"
+#include "network.h"
 
-#if CONFIG_USE_WIFI
-#include <WiFi.h>
-#include <WiFiMulti.h>
-WiFiMulti wifiMulti;
-#endif
+static const char* TAG = "main";
 
-#if CONFIG_USE_ETH
-#include <ETH.h>
-#endif
+using namespace std::placeholders;
+using json = nlohmann::json;
 
-JsonBidirectionalDataInterface jif;
-ServiceManager svcmgr(jif.Downstream);
+JSONRPC::WebsocketTransport tagAuthRPCTransport;
+JSONRPC::Node tagAuthRPC(tagAuthRPCTransport);
 
-WebSocketsClient webSocket;
+#define RELAY_PIN 32
 
-void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
-    switch(type) {
-        case WStype_DISCONNECTED:
-        {
-            Serial.printf("[WSc] Disconnected!\n");
-            svcmgr.Reset();
-            break;
-        }
-        case WStype_CONNECTED:
-        {
-            Serial.printf("[WSc] Connected to url: %s\n",  payload);
-            break;
-        }
-        case WStype_TEXT:
-        {
-            StaticJsonBuffer<512> jsonBuffer;
-            JsonObject& root = jsonBuffer.parseObject(payload);
-            jif.Upstream.Send(root);
-            break;
-        }
-        case WStype_BIN:
-        {
-            Serial.printf("[WSc] get binary length: %u\n", length);
-            break;
-        }
-    }
-}
-
-void WiFiEvent(WiFiEvent_t event)
+void setupNFC()
 {
-    switch (event) {
-#if CONFIG_USE_ETH
-        case SYSTEM_EVENT_ETH_START:
-            Serial.println("ETH Started");
-            //set eth hostname here
-            ETH.setHostname("esp32-ethernet");
-            break;
-        case SYSTEM_EVENT_ETH_CONNECTED:
-            Serial.println("ETH Connected");
-            break;
-        case SYSTEM_EVENT_ETH_GOT_IP:
-            Serial.print("ETH MAC: ");
-            Serial.print(ETH.macAddress());
-            Serial.print(", IPv4: ");
-            Serial.print(ETH.localIP());
-            if (ETH.fullDuplex()) {
-                Serial.print(", FULL_DUPLEX");
-            }
-            Serial.print(", ");
-            Serial.print(ETH.linkSpeed());
-            Serial.println("Mbps");
-            break;
-        case SYSTEM_EVENT_ETH_DISCONNECTED:
-            Serial.println("ETH Disconnected");
-            break;
-        case SYSTEM_EVENT_ETH_STOP:
-            Serial.println("ETH Stopped");
-            break;
-#endif
-        default:
-            break;
+    // Start PN532
+    NFC.begin();
+
+    delay(5);
+
+    // Get PN532 firmware version
+    GetFirmwareVersionResponse version;
+    if (!NFC.GetFirmwareVersion(version)) {
+        ESP_LOGE(TAG, "Unable to fetch PN532 firmware version");
+        ESP.restart();
+    }
+
+    // configure board to read RFID tags and prevent going to sleep
+    if (!NFC.SAMConfig()) {
+        ESP_LOGE(TAG, "NFC SAMConfig failed");
+        ESP.restart();
+    }
+    
+    // Print chip data
+    ESP_LOGI(TAG, "Found chip PN5%02X", version.IC);
+    ESP_LOGI(TAG, "Firmware version: %#04X", version.Ver);
+    ESP_LOGI(TAG, "Firmware revision: %#04X", version.Rev);
+    ESP_LOGI(TAG, "Features: ISO18092: %d, ISO14443A: %d, ISO14443B: %d",
+        (bool)version.Support.ISO18092,
+        (bool)version.Support.ISO14443_TYPEA,
+        (bool)version.Support.ISO14443_TYPEB);
+    
+    // Set the max number of retry attempts to read from a card
+    // This prevents us from waiting forever for a card, which is
+    // the default behaviour of the PN532.
+    if (!NFC.SetPassiveActivationRetries(0xFF)) {
+        ESP_LOGE(TAG, "NFC SetPassiveActivationRetries failed");
+        ESP.restart();
     }
 }
 
-JSONRPC::Client c;
+// Waits for RFID tag and then authenticates
+std::thread* RFIDThreadHandle = nullptr;
+void RFIDThread()
+{
+    setupNFC();
+    pinMode(RELAY_PIN, OUTPUT);
+
+    while(1)
+    {
+        // Finds nearby ISO14443 Type A tags
+        InListPassiveTargetResponse resp = NFC.InListPassiveTarget(1, BRTY_106KBPS_TYPE_A);
+
+        // Only read one tag at a time
+        if (resp.NbTg != 1)
+        {
+            // Yield to kernel
+            delay(10);
+            continue;
+        }
+        
+        ESP_LOGI(TAG, "Detected RFID tag");
+
+        // For parsing response data
+        ByteBuffer buf(resp.TgData);
+
+        // Parse as ISO14443 Type A target
+        PN532Packets::TargetDataTypeA tgdata;
+        buf >> tgdata;
+
+        // Convert UID and ATS to hex encoded string
+        std::string UID = BinaryDataToHexString(tgdata.UID);
+        std::string ATS = BinaryDataToHexString(tgdata.ATS);
+
+        ESP_LOGI(TAG, "Tag UID: %s", UID.c_str());
+
+        // Build taginfo object for auth RPC call
+        json taginfo;
+        taginfo["ATQA"] = tgdata.ATQA;
+        taginfo["SAK"] = tgdata.SAK;
+        taginfo["ATS"] = ATS;
+        taginfo["UID"] = UID;
+
+        // Register transceive function for this tag
+        int tg = tgdata.Tg;
+        tagAuthRPC.bind("transceive", [tg](std::string data) {
+            // Parse hex string to binary array
+            BinaryData buf = HexStringToBinaryData(data);
+
+            // Create interface with tag
+            TagInterface tif = NFC.CreateTagInterface(tg);
+
+            // Send
+            if (tif.Write(buf))
+                throw JSONRPC::RPCMethodException(1, "Write failed");
+
+            // Receive
+            if (tif.Read(buf) < 0)
+                throw JSONRPC::RPCMethodException(2, "Read failed");
+
+            // Convert back to hex encoded string
+            return BinaryDataToHexString(buf);
+        });
+        
+        // Initiate authentication
+        bool authResult;
+        try {
+            authResult = tagAuthRPC.call("auth", taginfo);
+        } catch (const JSONRPC::RPCMethodException& e) {
+            ESP_LOGE(TAG, "Auth RPC call failed: %s", e.message.c_str());
+            continue;
+        } catch (const JSONRPC::TimeoutException& e) {
+            ESP_LOGE(TAG, "Auth timed out");
+            continue;
+        }
+
+        if (authResult) {
+            ESP_LOGI(TAG, "Auth successful!");
+
+            // Open doors
+            digitalWrite(RELAY_PIN, HIGH);
+            delay(500);
+            digitalWrite(RELAY_PIN, LOW);
+        } else
+            ESP_LOGE(TAG, "Auth failed!");
+    }
+}
 
 void setup() {
     Serial.begin(115200);
     Serial.setDebugOutput(true);
 
-    c.SetHandler(JSONRPC::JSONTransportHandler([](const json& o) {
-        json resp;
-        resp["jsonrpc"] = "2.0";
-        resp["id"] = o["id"];
-        resp["result"] = "labas as krabas";
-        c.HandleData(resp);
-    }));
+    network_setup();
 
-    std::future<json> o = c.CallAsync("test", 1, "2");
-    Serial.println(o.get().dump().c_str());
-
-    // Start PN532
-    NFC.begin();
-
-    GetFirmwareVersionResponse version;
-    if (!NFC.GetFirmwareVersion(version)) {
-        Serial.print("Didn't find PN53x board");
-        ESP.restart();
-    }
-    
-    // Got ok data, print it out!
-    Serial.print("Found chip PN5"); Serial.println(version.IC, HEX);
-    Serial.print("Firmware version: "); Serial.println(version.Ver, DEC);
-    Serial.print("Firmware revision: "); Serial.println(version.Rev, DEC);
-    Serial.print("Supports ISO18092: "); Serial.println((bool)version.Support.ISO18092);
-    Serial.print("Supports ISO14443 Type A: "); Serial.println((bool)version.Support.ISO14443_TYPEA);
-    Serial.print("Supports ISO14443 Type B: "); Serial.println((bool)version.Support.ISO14443_TYPEB);
-    
-    // Set the max number of retry attempts to read from a card
-    // This prevents us from waiting forever for a card, which is
-    // the default behaviour of the PN532.
-    NFC.SetPassiveActivationRetries(0x00);
-    
-    // configure board to read RFID tags
-    NFC.SAMConfig();
-
-    // Enable wifi event callbacks
-    WiFi.onEvent(WiFiEvent);
-
-    #if CONFIG_USE_WIFI
-        wifiMulti.addAP(CONFIG_WIFI_SSID, CONFIG_WIFI_PASSWORD);
-
-        Serial.println("Connecting Wifi...");
-        if(wifiMulti.run() == WL_CONNECTED) {
-            Serial.println("");
-            Serial.println("WiFi connected");
-            Serial.println("IP address: ");
-            Serial.println(WiFi.localIP());
-        }
-    #endif
-
-    #if CONFIG_USE_ETH
-        ETH.begin();
-    #endif
-
-    #if CONFIG_SERVER_SSL
-        webSocket.beginSSL(CONFIG_SERVER_HOST, CONFIG_SERVER_PORT);
-    #else
-        webSocket.begin(CONFIG_SERVER_HOST, CONFIG_SERVER_PORT);
-    #endif
-
-    webSocket.onEvent(webSocketEvent);
-  
-    // Bind upstream callback to relay data to websocket
-    jif.Upstream.SetCb([](const JsonObject& data) {
-        static char buf[200];
-        data.printTo(buf);
-        webSocket.sendTXT(buf);
-    });
+    tagAuthRPCTransport.begin("192.168.1.175", 3000);
+    RFIDThreadHandle = new std::thread(RFIDThread);
 }
 
 void loop() {
-    webSocket.loop();
-    svcmgr.Update();
+    network_loop();
+    tagAuthRPCTransport.update();
+
+    // Yield to kernel to prevent triggering watchdog
+    delay(10);
 }

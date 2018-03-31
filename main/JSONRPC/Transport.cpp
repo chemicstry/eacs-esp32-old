@@ -3,29 +3,28 @@
 using namespace JSONRPC;
 using json = nlohmann::json;
 
-// Registers a function which handles outgoing json data
-void Transport::SetHandler(const JSONTransportHandler& handler)
+void Transport::setUpstreamHandler(const TransportHandler& handler)
 {
-    _JSONHandler = handler;
+    _upstream = handler;
 }
 
-void Transport::SetHandler(const StringTransportHandler& handler)
+void Transport::setDownstreamHandler(const TransportHandler& handler)
 {
-    _StringHandler = handler;
+    _downstream = handler;
 }
 
-void Transport::HandleData(const std::string& s)
+void Transport::sendUpstream(const json& j)
 {
-    HandleData(json::parse(s));
+    if (_upstream)
+        _upstream(j);
+    else
+        throw NoTransportHandlerException();
 }
 
-void Transport::Send(const json& j)
+void Transport::sendDownstream(const json& j)
 {
-    // Prefer json handler
-    if (_JSONHandler)
-        _JSONHandler(j);
-    else if (_StringHandler)
-        _StringHandler(j.dump());
+    if (_downstream)
+        _downstream(j);
     else
         throw NoTransportHandlerException();
 }
