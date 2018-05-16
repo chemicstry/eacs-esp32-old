@@ -44,7 +44,7 @@ void Client::handleDownstream(const json& j)
         // Find promise
         auto it = _requests.find(id);
         if (it == _requests.end())
-            throw RequestNotFoundException();
+            return;
 
         promise = it->second.promise;
         _requests.erase(it);

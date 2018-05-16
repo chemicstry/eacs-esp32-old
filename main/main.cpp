@@ -8,8 +8,11 @@
 #include <thread>
 #include "Arduino.h"
 #include "network.h"
+#include "driver/uart.h"
 
 static const char* TAG = "main";
+
+static const char* tokenHeader = "token: eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZGVudGlmaWVyIjoiZnJvbnRfZG9vciIsInBlcm1pc3Npb25zIjpbImVhY3MtdXNlci1hdXRoOmF1dGhfdWlkIl19.aEwkEDCrGAUrxZdHAJCxG-MreZYjaGBmSJKWY2upnA9LFuvoZP837dcx05IOpymuqZRoXT8XjZXTsEfoWuRZyQ";
 
 using namespace std::placeholders;
 using json = nlohmann::json;
@@ -17,19 +20,39 @@ using json = nlohmann::json;
 // tag auth
 JSONRPC::WebsocketTransport tagAuthRPCTransport;
 JSONRPC::Node tagAuthRPC(tagAuthRPCTransport);
+const char* tagAuthRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
 
 // user auth
 JSONRPC::WebsocketTransport userAuthRPCTransport;
 JSONRPC::Node userAuthRPC(userAuthRPCTransport);
+const char* userAuthRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
+
+// message bus
+JSONRPC::WebsocketTransport messageBusRPCTransport;
+JSONRPC::Node messageBusRPC(messageBusRPCTransport);
+const char* messageBusRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
 
 #define RELAY_PIN 32
+
+#define BUZZER_PIN 15
+
+void tone(int pin, int freq, int duration)
+{
+    int channel = 0;
+    int resolution = 8;
+
+    ledcSetup(channel, 2000, resolution);
+    ledcAttachPin(pin, channel);
+    ledcWriteTone(channel, freq);
+    ledcWrite(channel, 255);
+    delay(duration);
+    ledcWrite(channel, 0);
+}
 
 void setupNFC()
 {
     // Start PN532
     NFC.begin();
-
-    delay(5);
 
     // Get PN532 firmware version
     GetFirmwareVersionResponse version;
@@ -142,28 +165,47 @@ void RFIDThread()
             if (!tagAuthRPC.call("auth", BuildTagInfo(tgdata)))
             {
                 ESP_LOGE(TAG, "Tag auth failed!");
+                tone(BUZZER_PIN, 500, 100);
                 continue;
             }
 
             if (!userAuthRPC.call("auth_uid", "doors", UID))
             {
                 ESP_LOGE(TAG, "User auth failed!");
+                tone(BUZZER_PIN, 500, 100);
                 continue;
             }
         } catch (const JSONRPC::RPCMethodException& e) {
             ESP_LOGE(TAG, "RPC call failed: %s", e.message.c_str());
+            tone(BUZZER_PIN, 500, 100);
             continue;
         } catch (const JSONRPC::TimeoutException& e) {
             ESP_LOGE(TAG, "RPC call timed out");
+            tone(BUZZER_PIN, 500, 100);
             continue;
         }
 
         ESP_LOGI(TAG, "Auth successful!");
 
         // Open doors
-        digitalWrite(RELAY_PIN, HIGH);
+        /*digitalWrite(RELAY_PIN, HIGH);
         delay(500);
-        digitalWrite(RELAY_PIN, LOW);
+        digitalWrite(RELAY_PIN, LOW);*/
+        tone(BUZZER_PIN, 2000, 50);
+    }
+}
+
+#define BUTTON_PIN 34
+#define BUTTON_TIMEOUT 1000
+void update_button()
+{
+    static uint64_t lastPress = 0;
+
+    if (!digitalRead(BUTTON_PIN) && lastPress+BUTTON_TIMEOUT < millis())
+    {
+        lastPress = millis();
+        ESP_LOGI(TAG, "Button pressed");
+        messageBusRPC.notify("publish", "button");
     }
 }
 
@@ -177,9 +219,22 @@ void setup() {
     // Configures task state reporting if enabled in menuconfig
     EnableTaskStats();
 
+    // Setup button as input
+    pinMode(BUTTON_PIN, INPUT);
+
+    // Temporary ground
+    pinMode(14, OUTPUT);
+    digitalWrite(14, LOW);
+
     // Connects to RPC servers
-    tagAuthRPCTransport.begin("192.168.1.175", 3000);
-    userAuthRPCTransport.begin("192.168.1.175", 3001);
+    tagAuthRPCTransport.beginSSL("192.168.1.175", 3000, "/", tagAuthRPCFingerprint);
+    userAuthRPCTransport.beginSSL("192.168.1.175", 3001, "/", userAuthRPCFingerprint);
+    messageBusRPCTransport.beginSSL("192.168.1.175", 3002, "/", messageBusRPCFingerprint);
+
+    // Sets authorisation tokens
+    tagAuthRPCTransport.setExtraHeaders(tokenHeader);
+    userAuthRPCTransport.setExtraHeaders(tokenHeader);
+    messageBusRPCTransport.setExtraHeaders(tokenHeader);
 
     // Starts main RFID thread
     RFIDThreadHandle = new std::thread(RFIDThread);
@@ -187,8 +242,10 @@ void setup() {
 
 void loop() {
     network_loop();
+    update_button();
     tagAuthRPCTransport.update();
     userAuthRPCTransport.update();
+    messageBusRPCTransport.update();
 
     // Yield to kernel to prevent triggering watchdog
     delay(10);

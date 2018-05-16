@@ -10,7 +10,7 @@ WebsocketTransport::WebsocketTransport()
 {
     setUpstreamHandler(JSONRPC::TransportHandler([this](const json& j) {
         std::string s = j.dump();
-        ESP_LOGI(TAG, "Sent: %s", s.c_str());
+        ESP_LOGD(TAG, "Sent: %s", s.c_str());
         {
             std::lock_guard<std::recursive_mutex> l(_mutex);
             sendTXT(s.c_str());
@@ -26,7 +26,6 @@ void WebsocketTransport::eventHandler(WStype_t type, uint8_t* payload, size_t le
     {
         case WStype_DISCONNECTED:
         {
-            Serial.printf("[WSc] Disconnected!\n");
             ESP_LOGI(TAG, "Disconnected");
             break;
         }
@@ -37,7 +36,7 @@ void WebsocketTransport::eventHandler(WStype_t type, uint8_t* payload, size_t le
         }
         case WStype_TEXT:
         {
-            ESP_LOGI(TAG, "Received: %s", (char*)payload);
+            ESP_LOGD(TAG, "Received: %s", (char*)payload);
             {
                 std::lock_guard<std::recursive_mutex> l(_mutex);
                 sendDownstream(json::parse((char*)payload));
@@ -46,7 +45,7 @@ void WebsocketTransport::eventHandler(WStype_t type, uint8_t* payload, size_t le
         }
         case WStype_BIN:
         {
-            ESP_LOGI(TAG, "Received binary. Len: %zu", length);
+            ESP_LOGD(TAG, "Received binary. Len: %zu", length);
             break;
         }
     }

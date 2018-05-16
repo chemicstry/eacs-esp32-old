@@ -19,14 +19,6 @@ using namespace std::chrono;
 
 namespace JSONRPC
 {
-    class RequestNotFoundException : public std::exception
-    {
-        const char* what() const throw()
-        {
-            return "Promise not found";
-        }
-    };
-
     typedef std::shared_ptr<std::promise<json>> PromisePtr;
     typedef std::future<json> Future;
 
@@ -46,6 +38,8 @@ namespace JSONRPC
 
         void setTransport(Transport* transport);
 
+        template<typename ...Args>
+        void notify(std::string method, Args&&... args);
         template<typename ...Args>
         json call(std::string method, Args&&... args);
         template<typename ...Args>
@@ -79,6 +73,23 @@ namespace JSONRPC
     {
         params.push_back(arg);
         unpack(params, std::forward<Args>(args)...);
+    }
+
+    template<typename ...Args>
+    inline void Client::notify(std::string method, Args&&... args)
+    {
+        json j;
+        j["jsonrpc"] = "2.0";
+        j["method"] = method;
+
+        // Unpack arguments
+        unpack(j["params"], std::forward<Args>(args)...);
+
+        // Send formatted JSON RPC message
+        if (_transport)
+            _transport->sendUpstream(j);
+        else
+            throw NoTransportException();
     }
 
     template<typename ...Args>
