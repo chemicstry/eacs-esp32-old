@@ -1,0 +1,8 @@
+# Enable C++ exceptions
+CONFIG_CXX_EXCEPTIONS=y
+
+# Set default flash size to 4MB
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Increase pthread stack size
+CONFIG_ESP32_PTHREAD_TASK_STACK_SIZE_DEFAULT=8192

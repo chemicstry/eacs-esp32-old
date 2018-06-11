@@ -12,7 +12,9 @@
 #include <ETH.h>
 #endif
 
+#if CONFIG_USE_ETH || CONFIG_USE_WIFI
 void WiFiEvent(WiFiEvent_t event);
+#endif
 
 void network_setup();
 void network_loop();

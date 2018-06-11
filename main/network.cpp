@@ -3,12 +3,19 @@
 
 static const char* TAG = "NETWORK";
 
-WiFiMulti wifiMulti;
+#if !CONFIG_USE_ETH && !CONFIG_USE_WIFI
+    #warning "No netwokr connection enabled. Both WiFi and Ethernet disabled."
+#endif
 
+#if CONFIG_USE_WIFI
+WiFiMulti wifiMulti;
+#endif
+
+#if CONFIG_USE_ETH || CONFIG_USE_WIFI
 void WiFiEvent(WiFiEvent_t event)
 {
     switch (event) {
-#if CONFIG_USE_ETH
+        #if CONFIG_USE_ETH
         case SYSTEM_EVENT_ETH_START:
             Serial.println("ETH Started");
             //set eth hostname here
@@ -35,16 +42,19 @@ void WiFiEvent(WiFiEvent_t event)
         case SYSTEM_EVENT_ETH_STOP:
             Serial.println("ETH Stopped");
             break;
-#endif
+        #endif
         default:
             break;
     }
 }
+#endif
 
 void network_setup()
 {
-    // Enable wifi event callbacks
-    WiFi.onEvent(WiFiEvent);
+    #if CONFIG_USE_ETH || CONFIG_USE_WIFI
+        // Enable wifi event callbacks
+        WiFi.onEvent(WiFiEvent);
+    #endif
 
     #if CONFIG_USE_WIFI
         wifiMulti.addAP(CONFIG_WIFI_SSID, CONFIG_WIFI_PASSWORD);

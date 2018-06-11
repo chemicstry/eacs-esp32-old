@@ -78,8 +78,8 @@ void setupNFC()
     
     // Set the max number of retry attempts to read from a card
     // This prevents us from waiting forever for a card, which is
-    // the default behaviour of the PN532.
-    if (!NFC.SetPassiveActivationRetries(0xFF)) {
+        // the default behaviour of the PN532.
+    if (!NFC.SetPassiveActivationRetries(0x00)) {
         ESP_LOGE(TAG, "NFC SetPassiveActivationRetries failed");
         ESP.restart();
     }
@@ -98,8 +98,8 @@ json BuildTagInfo(const PN532Packets::TargetDataTypeA& tgdata)
 }
 
 // Waits for RFID tag and then authenticates
-std::thread* RFIDThreadHandle = nullptr;
-void RFIDThread()
+std::thread RFIDThread;
+void RFIDThreadFunc()
 {
     // Configures PN532
     setupNFC();
@@ -134,7 +134,12 @@ void RFIDThread()
     while(1)
     {
         // Finds nearby ISO14443 Type A tags
-        InListPassiveTargetResponse resp = NFC.InListPassiveTarget(1, BRTY_106KBPS_TYPE_A);
+        InListPassiveTargetResponse resp;
+        if (!NFC.InListPassiveTarget(resp, 1, BRTY_106KBPS_TYPE_A))
+        {
+            ESP_LOGE(TAG, "NFC InListPassiveTarget failed");
+            ESP.restart();
+        }
 
         // Only read one tag at a time
         if (resp.NbTg != 1)
@@ -209,7 +214,22 @@ void update_button()
     }
 }
 
-void setup() {
+std::thread NetworkThread;
+void NetworkThreadFunc() {
+    while(1)
+    {
+        network_loop();
+        update_button();
+        tagAuthRPCTransport.update();
+        userAuthRPCTransport.update();
+        messageBusRPCTransport.update();
+
+        // Yield to kernel to prevent triggering watchdog
+        delay(10);
+    }
+}
+
+extern "C" void app_main() {
     Serial.begin(115200);
     Serial.setDebugOutput(true);
 
@@ -227,26 +247,18 @@ void setup() {
     digitalWrite(14, LOW);
 
     // Connects to RPC servers
-    tagAuthRPCTransport.beginSSL("192.168.1.175", 3000, "/", tagAuthRPCFingerprint);
-    userAuthRPCTransport.beginSSL("192.168.1.175", 3001, "/", userAuthRPCFingerprint);
-    messageBusRPCTransport.beginSSL("192.168.1.175", 3002, "/", messageBusRPCFingerprint);
+    tagAuthRPCTransport.beginSSL("195.201.36.24", 3000, "/", tagAuthRPCFingerprint);
+    userAuthRPCTransport.beginSSL("195.201.36.24", 3001, "/", userAuthRPCFingerprint);
+    messageBusRPCTransport.beginSSL("195.201.36.24", 3002, "/", messageBusRPCFingerprint);
 
     // Sets authorisation tokens
     tagAuthRPCTransport.setExtraHeaders(tokenHeader);
     userAuthRPCTransport.setExtraHeaders(tokenHeader);
     messageBusRPCTransport.setExtraHeaders(tokenHeader);
 
+    // Starts network thread
+    NetworkThread = std::thread(NetworkThreadFunc);
+
     // Starts main RFID thread
-    RFIDThreadHandle = new std::thread(RFIDThread);
-}
-
-void loop() {
-    network_loop();
-    update_button();
-    tagAuthRPCTransport.update();
-    userAuthRPCTransport.update();
-    messageBusRPCTransport.update();
-
-    // Yield to kernel to prevent triggering watchdog
-    delay(10);
+    RFIDThread = std::thread(RFIDThreadFunc);
 }
