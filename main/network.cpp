@@ -69,12 +69,20 @@ void network_setup()
     #endif
 }
 
-void network_loop()
+bool network_loop()
 {
     #if CONFIG_USE_WIFI
         if (wifiMulti.run() != WL_CONNECTED) {
-            ESP_LOGE(TAG, "WiFi not connected!");
-            delay(1000);
+            static uint32_t lastLog = 0;
+            if (lastLog + 1000 < millis())
+            {
+                ESP_LOGE(TAG, "WiFi not connected!");
+                lastLog = millis();
+            }
+
+            return false;
         }
     #endif
+
+    return true;
 }

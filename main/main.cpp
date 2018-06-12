@@ -218,11 +218,14 @@ std::thread NetworkThread;
 void NetworkThreadFunc() {
     while(1)
     {
-        network_loop();
+        if (network_loop())
+        {
+            tagAuthRPCTransport.update();
+            userAuthRPCTransport.update();
+            messageBusRPCTransport.update();
+        }
+
         update_button();
-        tagAuthRPCTransport.update();
-        userAuthRPCTransport.update();
-        messageBusRPCTransport.update();
 
         // Yield to kernel to prevent triggering watchdog
         delay(10);
