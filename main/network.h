@@ -15,6 +15,6 @@
 void WiFiEvent(WiFiEvent_t event);
 
 void network_setup();
-void network_loop();
+bool network_loop();
 
 #endif

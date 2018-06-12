@@ -81,11 +81,11 @@ void Client::_timeoutThread(std::future<void> f)
             {
                 try {
                     throw TimeoutException();
-                } catch (const TimeoutException& e) {
-                    it->second.promise->set_exception(make_exception_ptr(e));
+                } catch (...) {
+                    it->second.promise->set_exception(std::current_exception());
                 }
 
-                _requests.erase(it++);
+                it = _requests.erase(it);
             } else
                 ++it;
         }
