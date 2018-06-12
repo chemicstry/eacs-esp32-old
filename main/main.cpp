@@ -49,6 +49,15 @@ void tone(int pin, int freq, int duration)
     ledcWrite(channel, 0);
 }
 
+// Opens doors
+void open()
+{
+    ESP_LOGI(TAG, "Opening doors");
+    digitalWrite(RELAY_PIN, HIGH);
+    delay(3000);
+    digitalWrite(RELAY_PIN, LOW);
+}
+
 void setupNFC()
 {
     // Start PN532
@@ -193,24 +202,40 @@ void RFIDThreadFunc()
         ESP_LOGI(TAG, "Auth successful!");
 
         // Open doors
-        /*digitalWrite(RELAY_PIN, HIGH);
-        delay(500);
-        digitalWrite(RELAY_PIN, LOW);*/
-        tone(BUZZER_PIN, 2000, 50);
+        open();
     }
 }
 
-#define BUTTON_PIN 34
-#define BUTTON_TIMEOUT 1000
-void update_button()
-{
-    static uint64_t lastPress = 0;
+#define READER_BUTTON_PIN 14
+#define READER_BUTTON_TIMEOUT 1000
+#define EXIT_BUTTON_PIN 13
+#define EXIT_BUTTON_TIMEOUT 1000
 
-    if (!digitalRead(BUTTON_PIN) && lastPress+BUTTON_TIMEOUT < millis())
+std::thread GPIOThread;
+void GPIOThreadFunc()
+{
+    static uint64_t readerButtonTimeout = 0;
+    static uint64_t exitButtonTimeout = 0;
+
+    ESP_LOGI(TAG, "GPIO thread started");
+
+    while(1)
     {
-        lastPress = millis();
-        ESP_LOGI(TAG, "Button pressed");
-        messageBusRPC.notify("publish", "button");
+        if (!digitalRead(READER_BUTTON_PIN) && readerButtonTimeout+READER_BUTTON_TIMEOUT < millis())
+        {
+            readerButtonTimeout = millis();
+            ESP_LOGI(TAG, "Reader button pressed");
+            messageBusRPC.notify("publish", "button");
+        }
+
+        if (!digitalRead(EXIT_BUTTON_PIN) && exitButtonTimeout+EXIT_BUTTON_TIMEOUT < millis())
+        {
+            exitButtonTimeout = millis();
+            ESP_LOGI(TAG, "Exit button pressed");
+            Open();
+        }
+
+        delay(10);
     }
 }
 
@@ -242,12 +267,9 @@ extern "C" void app_main() {
     // Configures task state reporting if enabled in menuconfig
     EnableTaskStats();
 
-    // Setup button as input
-    pinMode(BUTTON_PIN, INPUT);
-
-    // Temporary ground
-    pinMode(14, OUTPUT);
-    digitalWrite(14, LOW);
+    // Setup buttons
+    pinMode(READER_BUTTON_PIN, INPUT);
+    pinMode(EXIT_BUTTON_PIN, INPUT);
 
     // Connects to RPC servers
     tagAuthRPCTransport.beginSSL("195.201.36.24", 3000, "/", tagAuthRPCFingerprint);
@@ -264,4 +286,7 @@ extern "C" void app_main() {
 
     // Starts main RFID thread
     RFIDThread = std::thread(RFIDThreadFunc);
+
+    // Starts GPIO thread (button checking)
+    GPIOThread = std::thread(GPIOThreadFunc);
 }
