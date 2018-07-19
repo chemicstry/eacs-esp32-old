@@ -9,6 +9,7 @@
 #include "Arduino.h"
 #include "network.h"
 #include "driver/uart.h"
+#include "sd_auth.h"
 
 static const char* TAG = "main";
 
@@ -34,7 +35,13 @@ const char* messageBusRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C
 
 #define RELAY_PIN 32
 
-#define BUZZER_PIN 15
+#define BUZZER_PIN 16
+void buzz(int duration)
+{
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(duration);
+    digitalWrite(BUZZER_PIN, LOW);
+}
 
 void tone(int pin, int freq, int duration)
 {
@@ -54,6 +61,7 @@ void open()
 {
     ESP_LOGI(TAG, "Opening doors");
     digitalWrite(RELAY_PIN, HIGH);
+    buzz(200);
     delay(3000);
     digitalWrite(RELAY_PIN, LOW);
 }
@@ -61,6 +69,9 @@ void open()
 void setupNFC()
 {
     // Start PN532
+    //NFC.begin();
+    PN532Serial.begin(PN532_HSU_SPEED, SERIAL_8N1, 36, 4);
+    //PN532Serial.begin(PN532_HSU_SPEED);
     NFC.begin();
 
     // Get PN532 firmware version
@@ -173,6 +184,13 @@ void RFIDThreadFunc()
         // Convert UID to hex encoded string
         std::string UID = BinaryDataToHexString(tgdata.UID);
         ESP_LOGI(TAG, "Tag UID: %s", UID.c_str());
+
+        if (sd_auth_uid(UID))
+            open();
+        else
+            buzz(500);
+        
+        continue;
         
         // Initiate authentication
         try {
@@ -206,7 +224,7 @@ void RFIDThreadFunc()
     }
 }
 
-#define READER_BUTTON_PIN 14
+#define READER_BUTTON_PIN 17
 #define READER_BUTTON_TIMEOUT 1000
 #define EXIT_BUTTON_PIN 13
 #define EXIT_BUTTON_TIMEOUT 1000
@@ -232,7 +250,7 @@ void GPIOThreadFunc()
         {
             exitButtonTimeout = millis();
             ESP_LOGI(TAG, "Exit button pressed");
-            Open();
+            open();
         }
 
         delay(10);
@@ -250,8 +268,6 @@ void NetworkThreadFunc() {
             messageBusRPCTransport.update();
         }
 
-        update_button();
-
         // Yield to kernel to prevent triggering watchdog
         delay(10);
     }
@@ -267,9 +283,15 @@ extern "C" void app_main() {
     // Configures task state reporting if enabled in menuconfig
     EnableTaskStats();
 
+    // SD auth
+    if (!sd_auth_init())
+        ESP.restart();
+
     // Setup buttons
-    pinMode(READER_BUTTON_PIN, INPUT);
-    pinMode(EXIT_BUTTON_PIN, INPUT);
+    pinMode(READER_BUTTON_PIN, INPUT_PULLUP);
+    pinMode(EXIT_BUTTON_PIN, INPUT_PULLUP);
+
+    pinMode(BUZZER_PIN, OUTPUT);
 
     // Connects to RPC servers
     tagAuthRPCTransport.beginSSL("195.201.36.24", 3000, "/", tagAuthRPCFingerprint);
@@ -282,7 +304,7 @@ extern "C" void app_main() {
     messageBusRPCTransport.setExtraHeaders(tokenHeader);
 
     // Starts network thread
-    NetworkThread = std::thread(NetworkThreadFunc);
+    //NetworkThread = std::thread(NetworkThreadFunc);
 
     // Starts main RFID thread
     RFIDThread = std::thread(RFIDThreadFunc);
