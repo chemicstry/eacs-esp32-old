@@ -1,14 +1,17 @@
 #include "WebSocketsClient.h"
 #include "PN532Instance.h"
 #include "JSONRPC/JSONRPC.h"
-#include "JSONRPC/Node.h"
-#include "JSONRPC/WebsocketTransport.h"
+#include "Service.h"
 #include "Utils.h"
 #include "esp_log.h"
 #include <thread>
 #include "Arduino.h"
 #include "network.h"
 #include "driver/uart.h"
+
+#if CONFIG_USE_MDNS
+#include <ESPmDNS.h>
+#endif
 
 static const char* TAG = "main";
 
@@ -17,20 +20,33 @@ static const char* tokenHeader = "token: eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.ey
 using namespace std::placeholders;
 using json = nlohmann::json;
 
+Service tagAuth("eacs-tag-auth");
+Service userAuth("eacs-user-auth");
+Service messageBus("eacs-message-bus");
+
 // tag auth
+/*std::string tagAuthHost = "195.201.36.24";
+int tagAuthPort = 3000;
+std::string tagAuthPath = "/";
 JSONRPC::WebsocketTransport tagAuthRPCTransport;
 JSONRPC::Node tagAuthRPC(tagAuthRPCTransport);
 const char* tagAuthRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
 
 // user auth
+std::string userAuthHost = "195.201.36.24";
+int userAuthPort = 3001;
+std::string userAuthPath = "/";
 JSONRPC::WebsocketTransport userAuthRPCTransport;
 JSONRPC::Node userAuthRPC(userAuthRPCTransport);
 const char* userAuthRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
 
 // message bus
+std::string messageBusHost = "195.201.36.24";
+int messageBusPort = 3001;
+std::string messageBusPath = "/";
 JSONRPC::WebsocketTransport messageBusRPCTransport;
 JSONRPC::Node messageBusRPC(messageBusRPCTransport);
-const char* messageBusRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
+const char* messageBusRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";*/
 
 #define RELAY_PIN 32
 
@@ -121,7 +137,7 @@ void RFIDThreadFunc()
     static int currentTg = 0;
 
     // Transceive RPC method
-    tagAuthRPC.bind("transceive", [](std::string data) {
+    tagAuth.RPC->bind("transceive", [](std::string data) {
         // Parse hex string to binary array
         BinaryData buf = HexStringToBinaryData(data);
 
@@ -176,14 +192,14 @@ void RFIDThreadFunc()
         
         // Initiate authentication
         try {
-            if (!tagAuthRPC.call("auth", BuildTagInfo(tgdata)))
+            if (!tagAuth.RPC->call("auth", BuildTagInfo(tgdata)))
             {
                 ESP_LOGE(TAG, "Tag auth failed!");
                 tone(BUZZER_PIN, 500, 100);
                 continue;
             }
 
-            if (!userAuthRPC.call("auth_uid", "doors", UID))
+            if (!userAuth.RPC->call("auth_uid", "doors", UID))
             {
                 ESP_LOGE(TAG, "User auth failed!");
                 tone(BUZZER_PIN, 500, 100);
@@ -225,14 +241,14 @@ void GPIOThreadFunc()
         {
             readerButtonTimeout = millis();
             ESP_LOGI(TAG, "Reader button pressed");
-            messageBusRPC.notify("publish", "button");
+            messageBus.RPC->notify("publish", "button");
         }
 
         if (!digitalRead(EXIT_BUTTON_PIN) && exitButtonTimeout+EXIT_BUTTON_TIMEOUT < millis())
         {
             exitButtonTimeout = millis();
             ESP_LOGI(TAG, "Exit button pressed");
-            Open();
+            open();
         }
 
         delay(10);
@@ -245,19 +261,28 @@ void NetworkThreadFunc() {
     {
         if (network_loop())
         {
-            tagAuthRPCTransport.update();
-            userAuthRPCTransport.update();
-            messageBusRPCTransport.update();
+            tagAuth.transport.update();
+            userAuth.transport.update();
+            messageBus.transport.update();
         }
-
-        update_button();
 
         // Yield to kernel to prevent triggering watchdog
         delay(10);
     }
 }
 
+
 extern "C" void app_main() {
+    initArduino();
+
+    // Start mDNS
+    #if CONFIG_USE_MDNS
+    if (!MDNS.begin("eacs-esp32")) {
+        ESP_LOGE(TAG, "mDNS responder setup failed.");
+        ESP.restart();
+    }
+    #endif
+
     Serial.begin(115200);
     Serial.setDebugOutput(true);
 
@@ -271,15 +296,24 @@ extern "C" void app_main() {
     pinMode(READER_BUTTON_PIN, INPUT);
     pinMode(EXIT_BUTTON_PIN, INPUT);
 
+    // Wait for MDNS service to stabilise and then query services
+    delay(10000);
+    userAuth.MDNSQuery();
+
+    // Setup services
+    tagAuth.fingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
+    userAuth.fingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
+    messageBus.fingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
+
     // Connects to RPC servers
-    tagAuthRPCTransport.beginSSL("195.201.36.24", 3000, "/", tagAuthRPCFingerprint);
-    userAuthRPCTransport.beginSSL("195.201.36.24", 3001, "/", userAuthRPCFingerprint);
-    messageBusRPCTransport.beginSSL("195.201.36.24", 3002, "/", messageBusRPCFingerprint);
+    tagAuth.BeginTransportSSL();
+    userAuth.BeginTransportSSL();
+    messageBus.BeginTransportSSL();
 
     // Sets authorisation tokens
-    tagAuthRPCTransport.setExtraHeaders(tokenHeader);
-    userAuthRPCTransport.setExtraHeaders(tokenHeader);
-    messageBusRPCTransport.setExtraHeaders(tokenHeader);
+    tagAuth.transport.setExtraHeaders(tagAuth.token.c_str());
+    userAuth.transport.setExtraHeaders(userAuth.token.c_str());
+    messageBus.transport.setExtraHeaders(messageBus.token.c_str());
 
     // Starts network thread
     NetworkThread = std::thread(NetworkThreadFunc);
@@ -290,3 +324,27 @@ extern "C" void app_main() {
     // Starts GPIO thread (button checking)
     GPIOThread = std::thread(GPIOThreadFunc);
 }
+
+// tag auth
+/*std::string tagAuthHost = "195.201.36.24";
+int tagAuthPort = 3000;
+std::string tagAuthPath = "/";
+JSONRPC::WebsocketTransport tagAuthRPCTransport;
+JSONRPC::Node tagAuthRPC(tagAuthRPCTransport);
+const char* tagAuthRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
+
+// user auth
+std::string userAuthHost = "195.201.36.24";
+int userAuthPort = 3001;
+std::string userAuthPath = "/";
+JSONRPC::WebsocketTransport userAuthRPCTransport;
+JSONRPC::Node userAuthRPC(userAuthRPCTransport);
+const char* userAuthRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
+
+// message bus
+std::string messageBusHost = "195.201.36.24";
+int messageBusPort = 3001;
+std::string messageBusPath = "/";
+JSONRPC::WebsocketTransport messageBusRPCTransport;
+JSONRPC::Node messageBusRPC(messageBusRPCTransport);
+const char* messageBusRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";*/

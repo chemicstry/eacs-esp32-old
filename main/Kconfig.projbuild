@@ -46,4 +46,10 @@ config SERVER_SSL
     help
         Use SSL when connecting to server.
 
+config USE_MDNS
+    bool "mDNS service discovery"
+    default true
+    help
+        Enables mDNS automatic service discovery
+
 endmenu
