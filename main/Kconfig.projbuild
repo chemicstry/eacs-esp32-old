@@ -38,79 +38,35 @@ config USE_MDNS
 
 endmenu
 
-menu "Tag Auth Service"
+menu "SERVER"
 
-config SERVICE_TAG_AUTH_ENABLED
-    bool "Enabled"
-    default false
-
-config SERVICE_TAG_AUTH_USE_MDNS
+config SERVER_USE_MDNS
     bool "Use mDNS"
-    depends on SERVICE_TAG_AUTH_ENABLED && USE_MDNS
+    depends on USE_MDNS
     default false
 
-config SERVICE_TAG_AUTH_HOST
-    string "Service host"
-    depends on SERVICE_TAG_AUTH_ENABLED && !SERVICE_TAG_AUTH_USE_MDNS
+config SERVER_HOST
+    string "Server host"
+    depends on !SERVER_USE_MDNS
     default "0.0.0.0"
 
-config SERVICE_TAG_AUTH_PORT
-    int "Service port"
-    depends on SERVICE_TAG_AUTH_ENABLED && !SERVICE_TAG_AUTH_USE_MDNS
+config SERVER_PORT
+    int "Server port"
+    depends on !SERVICE_TAG_AUTH_USE_MDNS
     default 3000
 
-config SERVICE_TAG_AUTH_SSL
+config SERVER_SSL
     bool "Use SSL"
-    depends on SERVICE_TAG_AUTH_ENABLED
     default true
 
-config SERVICE_TAG_AUTH_SSL_FINGERPRINT
+config SERVER_SSL_FINGERPRINT
     string "SSL fingerprint"
-    depends on SERVICE_TAG_AUTH_ENABLED && SERVICE_TAG_AUTH_SSL
+    depends on SERVICE_TAG_AUTH_SSL
 
-config SERVICE_TAG_AUTH_TOKEN
+config SERVER_TOKEN
     string "Authentication token"
-    depends on SERVICE_TAG_AUTH_ENABLED
 
 endmenu
-
-
-menu "User Auth Service"
-
-config SERVICE_USER_AUTH_ENABLED
-    bool "Enabled"
-    default false
-
-config SERVICE_USER_AUTH_USE_MDNS
-    bool "Use mDNS"
-    depends on SERVICE_USER_AUTH_ENABLED && USE_MDNS
-    default false
-
-config SERVICE_USER_AUTH_HOST
-    string "Service host"
-    depends on SERVICE_USER_AUTH_ENABLED && !SERVICE_USER_AUTH_USE_MDNS
-    default "0.0.0.0"
-
-config SERVICE_USER_AUTH_PORT
-    int "Service port"
-    depends on SERVICE_USER_AUTH_ENABLED && !SERVICE_USER_AUTH_USE_MDNS
-    default 3000
-
-config SERVICE_USER_AUTH_SSL
-    bool "Use SSL"
-    depends on SERVICE_USER_AUTH_ENABLED
-    default true
-
-config SERVICE_USER_AUTH_SSL_FINGERPRINT
-    string "SSL fingerprint"
-    depends on SERVICE_USER_AUTH_ENABLED && SERVICE_USER_AUTH_SSL
-
-config SERVICE_USER_AUTH_TOKEN
-    string "Authentication token"
-    depends on SERVICE_USER_AUTH_ENABLED
-
-endmenu
-
 
 menu "IO configuration"
 
@@ -147,7 +103,6 @@ config READER_TX_PIN
     default 4
 
 endmenu
-
 
 config DOOR_OPEN_DURATION
     int "Door open duration"

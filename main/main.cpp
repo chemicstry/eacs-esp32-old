@@ -18,9 +18,7 @@ static const char* TAG = "main";
 using namespace std::placeholders;
 using json = nlohmann::json;
 
-Service tagAuth("eacs-tag-auth");
-Service userAuth("eacs-user-auth");
-//Service messageBus("eacs-message-bus");
+Service server("eacs-server");
 
 #define RELAY_PIN CONFIG_RELAY_PIN
 #define BUZZER_PIN CONFIG_BUZZER_PIN
@@ -126,7 +124,7 @@ void RFIDThreadFunc()
     static int currentTg = 0;
 
     // Transceive RPC method
-    tagAuth.RPC->bind("transceive", [](std::string data) {
+    server.RPC->bind("transceive", [](std::string data) {
         // Parse hex string to binary array
         BinaryData buf = HexStringToBinaryData(data);
 
@@ -181,27 +179,14 @@ void RFIDThreadFunc()
         
         // Initiate authentication
         try {
-            #if CONFIG_SERVICE_TAG_AUTH_ENABLED
-                ESP_LOGI(TAG, "Performing tag authentication...");
+            ESP_LOGI(TAG, "Performing RPC authentication...");
 
-                if (!tagAuth.RPC->call("auth", BuildTagInfo(tgdata)))
-                {
-                    ESP_LOGE(TAG, "Tag auth failed!");
-                    buzz(BUZZ_LONG);
-                    continue;
-                }
-            #endif
-
-            #if CONFIG_SERVICE_USER_AUTH_ENABLED
-                ESP_LOGI(TAG, "Performing user authentication...");
-
-                if (!userAuth.RPC->call("auth_uid", "doors", UID))
-                {
-                    ESP_LOGE(TAG, "User auth failed!");
-                    buzz(BUZZ_LONG);
-                    continue;
-                }
-            #endif
+            if (!tagAuth.RPC->call("rfid:auth", BuildTagInfo(tgdata)))
+            {
+                ESP_LOGE(TAG, "Tag auth failed!");
+                buzz(BUZZ_LONG);
+                continue;
+            }
         } catch (const JSONRPC::RPCMethodException& e) {
             ESP_LOGE(TAG, "RPC call failed: %s", e.message.c_str());
             buzz(BUZZ_LONG);
@@ -258,15 +243,7 @@ void NetworkThreadFunc() {
     {
         if (network_loop())
         {
-            #if CONFIG_SERVICE_TAG_AUTH_ENABLED
-                tagAuth.transport.update();
-            #endif
-
-            #if CONFIG_SERVICE_USER_AUTH_ENABLED
-                userAuth.transport.update();
-            #endif
-
-            //messageBus.transport.update();
+            server.transport.update();
         }
 
         // Yield to kernel to prevent triggering watchdog
@@ -303,46 +280,21 @@ extern "C" void app_main() {
     pinMode(BUZZER_PIN, OUTPUT);
     digitalWrite(BUZZER_PIN, LOW);
 
-    // Configure tag auth service
-    #if CONFIG_SERVICE_TAG_AUTH_ENABLED
-        #if CONFIG_SERVICE_TAG_AUTH_USE_MDNS
-            tagAuth.MDNSQuery();
-        #else
-            tagAuth.host = CONFIG_SERVICE_TAG_AUTH_HOST;
-            tagAuth.port = CONFIG_SERVICE_TAG_AUTH_PORT;
-        #endif
-
-        tagAuth.token = CONFIG_SERVICE_TAG_AUTH_TOKEN;
-
-        #if CONFIG_SERVICE_TAG_AUTH_SSL
-            tagAuth.fingerprint = CONFIG_SERVICE_TAG_AUTH_SSL_FINGERPRINT;
-            tagAuth.BeginTransportSSL();
-        #else
-            tagAuth.BeginTransport();
-        #endif 
+    #if CONFIG_SERVER_USE_MDNS
+        server.MDNSQuery();
+    #else
+        server.host = CONFIG_SERVER_HOST;
+        server.port = CONFIG_SERVER_PORT;
     #endif
 
-    // Configure user auth service
-    #if CONFIG_SERVICE_USER_AUTH_ENABLED
-        #if CONFIG_SERVICE_USER_AUTH_USE_MDNS
-            userAuth.MDNSQuery();
-        #else
-            userAuth.host = CONFIG_SERVICE_USER_AUTH_HOST;
-            userAuth.port = CONFIG_SERVICE_USER_AUTH_PORT;
-        #endif
+    server.token = CONFIG_SERVER_TOKEN;
 
-        userAuth.token = CONFIG_SERVICE_USER_AUTH_TOKEN;
-
-        #if CONFIG_SERVICE_USER_AUTH_SSL
-            userAuth.fingerprint = CONFIG_SERVICE_USER_AUTH_SSL_FINGERPRINT;
-            userAuth.BeginTransportSSL();
-        #else
-            userAuth.BeginTransport();
-        #endif
-    #endif
-
-    // Connects to RPC servers
-    //messageBus.BeginTransportSSL();
+    #if CONFIG_SERVER_SSL
+        server.fingerprint = CONFIG_SERVER_SSL_FINGERPRINT;
+        server.BeginTransportSSL();
+    #else
+        server.BeginTransport();
+    #endif 
 
     // Starts network thread
     NetworkThread = std::thread(NetworkThreadFunc);
