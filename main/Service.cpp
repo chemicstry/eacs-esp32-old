@@ -40,3 +40,9 @@ void Service::BeginTransportSSL()
 {
     transport.beginSSL(host.c_str(), port, path.c_str(), fingerprint.c_str());
 }
+
+void Service::SetAuthToken(const std::string& token)
+{
+    tokenHeader = "token: " + token;
+    transport.setExtraHeaders(tokenHeader.c_str());
+}

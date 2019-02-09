@@ -24,12 +24,14 @@ public:
     void BeginTransport();
     void BeginTransportSSL();
 
+    void SetAuthToken(const std::string& token);
+
     std::string name;
     std::string host;
     int port;
     std::string path;
     std::string fingerprint;
-    std::string token;
+    std::string tokenHeader;
     JSONRPC::WebsocketTransport transport;
     JSONRPC::Node* RPC;
 };

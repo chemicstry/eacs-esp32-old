@@ -15,42 +15,15 @@
 
 static const char* TAG = "main";
 
-static const char* tokenHeader = "token: eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZGVudGlmaWVyIjoiZnJvbnRfZG9vciIsInBlcm1pc3Npb25zIjpbImVhY3MtdXNlci1hdXRoOmF1dGhfdWlkIl19.aEwkEDCrGAUrxZdHAJCxG-MreZYjaGBmSJKWY2upnA9LFuvoZP837dcx05IOpymuqZRoXT8XjZXTsEfoWuRZyQ";
-
 using namespace std::placeholders;
 using json = nlohmann::json;
 
 Service tagAuth("eacs-tag-auth");
 Service userAuth("eacs-user-auth");
-Service messageBus("eacs-message-bus");
+//Service messageBus("eacs-message-bus");
 
-// tag auth
-/*std::string tagAuthHost = "195.201.36.24";
-int tagAuthPort = 3000;
-std::string tagAuthPath = "/";
-JSONRPC::WebsocketTransport tagAuthRPCTransport;
-JSONRPC::Node tagAuthRPC(tagAuthRPCTransport);
-const char* tagAuthRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
-
-// user auth
-std::string userAuthHost = "195.201.36.24";
-int userAuthPort = 3001;
-std::string userAuthPath = "/";
-JSONRPC::WebsocketTransport userAuthRPCTransport;
-JSONRPC::Node userAuthRPC(userAuthRPCTransport);
-const char* userAuthRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
-
-// message bus
-std::string messageBusHost = "195.201.36.24";
-int messageBusPort = 3001;
-std::string messageBusPath = "/";
-JSONRPC::WebsocketTransport messageBusRPCTransport;
-JSONRPC::Node messageBusRPC(messageBusRPCTransport);
-const char* messageBusRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";*/
-
-#define RELAY_PIN 32
-
-#define BUZZER_PIN 15
+#define RELAY_PIN CONFIG_RELAY_PIN
+#define BUZZER_PIN CONFIG_BUZZER_PIN
 
 void tone(int pin, int freq, int duration)
 {
@@ -65,18 +38,34 @@ void tone(int pin, int freq, int duration)
     ledcWrite(channel, 0);
 }
 
+#define BUZZ_SHORT 200
+#define BUZZ_LONG 800
+
+void buzz(int duration)
+{
+    #if CONFIG_BUZZER_PWM
+        tone(CONFIG_BUZZER_PIN, 2000, duration);
+    #else
+        digitalWrite(CONFIG_BUZZER_PIN, HIGH);
+        delay(duration);
+        digitalWrite(CONFIG_BUZZER_PIN, LOW);
+    #endif
+}
+
 // Opens doors
 void open()
 {
     ESP_LOGI(TAG, "Opening doors");
     digitalWrite(RELAY_PIN, HIGH);
-    delay(3000);
+    buzz(BUZZ_SHORT);
+    delay(CONFIG_DOOR_OPEN_DURATION);
     digitalWrite(RELAY_PIN, LOW);
 }
 
 void setupNFC()
 {
     // Start PN532
+    PN532Serial.begin(PN532_HSU_SPEED, SERIAL_8N1, CONFIG_READER_RX_PIN, CONFIG_READER_TX_PIN);
     NFC.begin();
 
     // Get PN532 firmware version
@@ -103,7 +92,7 @@ void setupNFC()
     
     // Set the max number of retry attempts to read from a card
     // This prevents us from waiting forever for a card, which is
-        // the default behaviour of the PN532.
+    // the default behaviour of the PN532.
     if (!NFC.SetPassiveActivationRetries(0x00)) {
         ESP_LOGE(TAG, "NFC SetPassiveActivationRetries failed");
         ESP.restart();
@@ -192,26 +181,34 @@ void RFIDThreadFunc()
         
         // Initiate authentication
         try {
-            if (!tagAuth.RPC->call("auth", BuildTagInfo(tgdata)))
-            {
-                ESP_LOGE(TAG, "Tag auth failed!");
-                tone(BUZZER_PIN, 500, 100);
-                continue;
-            }
+            #if CONFIG_SERVICE_TAG_AUTH_ENABLED
+                ESP_LOGI(TAG, "Performing tag authentication...");
 
-            if (!userAuth.RPC->call("auth_uid", "doors", UID))
-            {
-                ESP_LOGE(TAG, "User auth failed!");
-                tone(BUZZER_PIN, 500, 100);
-                continue;
-            }
+                if (!tagAuth.RPC->call("auth", BuildTagInfo(tgdata)))
+                {
+                    ESP_LOGE(TAG, "Tag auth failed!");
+                    buzz(BUZZ_LONG);
+                    continue;
+                }
+            #endif
+
+            #if CONFIG_SERVICE_USER_AUTH_ENABLED
+                ESP_LOGI(TAG, "Performing user authentication...");
+
+                if (!userAuth.RPC->call("auth_uid", "doors", UID))
+                {
+                    ESP_LOGE(TAG, "User auth failed!");
+                    buzz(BUZZ_LONG);
+                    continue;
+                }
+            #endif
         } catch (const JSONRPC::RPCMethodException& e) {
             ESP_LOGE(TAG, "RPC call failed: %s", e.message.c_str());
-            tone(BUZZER_PIN, 500, 100);
+            buzz(BUZZ_LONG);
             continue;
         } catch (const JSONRPC::TimeoutException& e) {
             ESP_LOGE(TAG, "RPC call timed out");
-            tone(BUZZER_PIN, 500, 100);
+            buzz(BUZZ_LONG);
             continue;
         }
 
@@ -222,9 +219,9 @@ void RFIDThreadFunc()
     }
 }
 
-#define READER_BUTTON_PIN 14
+#define READER_BUTTON_PIN CONFIG_READER_BUTTON_PIN
 #define READER_BUTTON_TIMEOUT 1000
-#define EXIT_BUTTON_PIN 13
+#define EXIT_BUTTON_PIN CONFIG_EXIT_BUTTON_PIN
 #define EXIT_BUTTON_TIMEOUT 1000
 
 std::thread GPIOThread;
@@ -237,12 +234,12 @@ void GPIOThreadFunc()
 
     while(1)
     {
-        if (!digitalRead(READER_BUTTON_PIN) && readerButtonTimeout+READER_BUTTON_TIMEOUT < millis())
+        /*if (!digitalRead(READER_BUTTON_PIN) && readerButtonTimeout+READER_BUTTON_TIMEOUT < millis())
         {
             readerButtonTimeout = millis();
             ESP_LOGI(TAG, "Reader button pressed");
             messageBus.RPC->notify("publish", "button");
-        }
+        }*/
 
         if (!digitalRead(EXIT_BUTTON_PIN) && exitButtonTimeout+EXIT_BUTTON_TIMEOUT < millis())
         {
@@ -261,9 +258,15 @@ void NetworkThreadFunc() {
     {
         if (network_loop())
         {
-            tagAuth.transport.update();
-            userAuth.transport.update();
-            messageBus.transport.update();
+            #if CONFIG_SERVICE_TAG_AUTH_ENABLED
+                tagAuth.transport.update();
+            #endif
+
+            #if CONFIG_SERVICE_USER_AUTH_ENABLED
+                userAuth.transport.update();
+            #endif
+
+            //messageBus.transport.update();
         }
 
         // Yield to kernel to prevent triggering watchdog
@@ -277,10 +280,10 @@ extern "C" void app_main() {
 
     // Start mDNS
     #if CONFIG_USE_MDNS
-    if (!MDNS.begin("eacs-esp32")) {
-        ESP_LOGE(TAG, "mDNS responder setup failed.");
-        ESP.restart();
-    }
+        if (!MDNS.begin("eacs_esp32")) {
+            ESP_LOGE(TAG, "mDNS responder setup failed.");
+            ESP.restart();
+        }
     #endif
 
     Serial.begin(115200);
@@ -296,24 +299,50 @@ extern "C" void app_main() {
     pinMode(READER_BUTTON_PIN, INPUT);
     pinMode(EXIT_BUTTON_PIN, INPUT);
 
-    // Wait for MDNS service to stabilise and then query services
-    delay(10000);
-    userAuth.MDNSQuery();
+    // Setup buzzer
+    pinMode(BUZZER_PIN, OUTPUT);
+    digitalWrite(BUZZER_PIN, LOW);
 
-    // Setup services
-    tagAuth.fingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
-    userAuth.fingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
-    messageBus.fingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
+    // Configure tag auth service
+    #if CONFIG_SERVICE_TAG_AUTH_ENABLED
+        #if CONFIG_SERVICE_TAG_AUTH_USE_MDNS
+            tagAuth.MDNSQuery();
+        #else
+            tagAuth.host = CONFIG_SERVICE_TAG_AUTH_HOST;
+            tagAuth.port = CONFIG_SERVICE_TAG_AUTH_PORT;
+        #endif
+
+        tagAuth.token = CONFIG_SERVICE_TAG_AUTH_TOKEN;
+
+        #if CONFIG_SERVICE_TAG_AUTH_SSL
+            tagAuth.fingerprint = CONFIG_SERVICE_TAG_AUTH_SSL_FINGERPRINT;
+            tagAuth.BeginTransportSSL();
+        #else
+            tagAuth.BeginTransport();
+        #endif 
+    #endif
+
+    // Configure user auth service
+    #if CONFIG_SERVICE_USER_AUTH_ENABLED
+        #if CONFIG_SERVICE_USER_AUTH_USE_MDNS
+            userAuth.MDNSQuery();
+        #else
+            userAuth.host = CONFIG_SERVICE_USER_AUTH_HOST;
+            userAuth.port = CONFIG_SERVICE_USER_AUTH_PORT;
+        #endif
+
+        userAuth.token = CONFIG_SERVICE_USER_AUTH_TOKEN;
+
+        #if CONFIG_SERVICE_USER_AUTH_SSL
+            userAuth.fingerprint = CONFIG_SERVICE_USER_AUTH_SSL_FINGERPRINT;
+            userAuth.BeginTransportSSL();
+        #else
+            userAuth.BeginTransport();
+        #endif
+    #endif
 
     // Connects to RPC servers
-    tagAuth.BeginTransportSSL();
-    userAuth.BeginTransportSSL();
-    messageBus.BeginTransportSSL();
-
-    // Sets authorisation tokens
-    tagAuth.transport.setExtraHeaders(tagAuth.token.c_str());
-    userAuth.transport.setExtraHeaders(userAuth.token.c_str());
-    messageBus.transport.setExtraHeaders(messageBus.token.c_str());
+    //messageBus.BeginTransportSSL();
 
     // Starts network thread
     NetworkThread = std::thread(NetworkThreadFunc);
@@ -324,27 +353,3 @@ extern "C" void app_main() {
     // Starts GPIO thread (button checking)
     GPIOThread = std::thread(GPIOThreadFunc);
 }
-
-// tag auth
-/*std::string tagAuthHost = "195.201.36.24";
-int tagAuthPort = 3000;
-std::string tagAuthPath = "/";
-JSONRPC::WebsocketTransport tagAuthRPCTransport;
-JSONRPC::Node tagAuthRPC(tagAuthRPCTransport);
-const char* tagAuthRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
-
-// user auth
-std::string userAuthHost = "195.201.36.24";
-int userAuthPort = 3001;
-std::string userAuthPath = "/";
-JSONRPC::WebsocketTransport userAuthRPCTransport;
-JSONRPC::Node userAuthRPC(userAuthRPCTransport);
-const char* userAuthRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";
-
-// message bus
-std::string messageBusHost = "195.201.36.24";
-int messageBusPort = 3001;
-std::string messageBusPath = "/";
-JSONRPC::WebsocketTransport messageBusRPCTransport;
-JSONRPC::Node messageBusRPC(messageBusRPCTransport);
-const char* messageBusRPCFingerprint = "91:B4:1D:9D:A3:7E:FB:EE:EB:21:1E:E8:A3:C5:B1:0E:EB:74:FE:41:C8:32:DF:F3:DC:1B:5A:42:5C:AA:AC:67";*/

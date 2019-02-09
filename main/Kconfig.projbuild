@@ -1,5 +1,7 @@
 menu "RFID Module Configuration"
 
+menu "Network Settings"
+
 config USE_ETH
     bool "Enable Ethernet connectivity"
     default false
@@ -28,28 +30,129 @@ config WIFI_PASSWORD
 
 		Can be left blank if the network has no security set.
 
-config SERVER_HOST
-    string "Server Host"
-	default "192.168.0.1"
-	help
-		Hostname of the server (can be DNS domain).
-
-config SERVER_PORT
-    int "Server Port"
-	default 3000
-	help
-		Port of the server.
-
-config SERVER_SSL
-    bool "Server SSL"
-    default false
-    help
-        Use SSL when connecting to server.
-
 config USE_MDNS
     bool "mDNS service discovery"
     default true
     help
         Enables mDNS automatic service discovery
+
+endmenu
+
+menu "Tag Auth Service"
+
+config SERVICE_TAG_AUTH_ENABLED
+    bool "Enabled"
+    default false
+
+config SERVICE_TAG_AUTH_USE_MDNS
+    bool "Use mDNS"
+    depends on SERVICE_TAG_AUTH_ENABLED && USE_MDNS
+    default false
+
+config SERVICE_TAG_AUTH_HOST
+    string "Service host"
+    depends on SERVICE_TAG_AUTH_ENABLED && !SERVICE_TAG_AUTH_USE_MDNS
+    default "0.0.0.0"
+
+config SERVICE_TAG_AUTH_PORT
+    int "Service port"
+    depends on SERVICE_TAG_AUTH_ENABLED && !SERVICE_TAG_AUTH_USE_MDNS
+    default 3000
+
+config SERVICE_TAG_AUTH_SSL
+    bool "Use SSL"
+    depends on SERVICE_TAG_AUTH_ENABLED
+    default true
+
+config SERVICE_TAG_AUTH_SSL_FINGERPRINT
+    string "SSL fingerprint"
+    depends on SERVICE_TAG_AUTH_ENABLED && SERVICE_TAG_AUTH_SSL
+
+config SERVICE_TAG_AUTH_TOKEN
+    string "Authentication token"
+    depends on SERVICE_TAG_AUTH_ENABLED
+
+endmenu
+
+
+menu "User Auth Service"
+
+config SERVICE_USER_AUTH_ENABLED
+    bool "Enabled"
+    default false
+
+config SERVICE_USER_AUTH_USE_MDNS
+    bool "Use mDNS"
+    depends on SERVICE_USER_AUTH_ENABLED && USE_MDNS
+    default false
+
+config SERVICE_USER_AUTH_HOST
+    string "Service host"
+    depends on SERVICE_USER_AUTH_ENABLED && !SERVICE_USER_AUTH_USE_MDNS
+    default "0.0.0.0"
+
+config SERVICE_USER_AUTH_PORT
+    int "Service port"
+    depends on SERVICE_USER_AUTH_ENABLED && !SERVICE_USER_AUTH_USE_MDNS
+    default 3000
+
+config SERVICE_USER_AUTH_SSL
+    bool "Use SSL"
+    depends on SERVICE_USER_AUTH_ENABLED
+    default true
+
+config SERVICE_USER_AUTH_SSL_FINGERPRINT
+    string "SSL fingerprint"
+    depends on SERVICE_USER_AUTH_ENABLED && SERVICE_USER_AUTH_SSL
+
+config SERVICE_USER_AUTH_TOKEN
+    string "Authentication token"
+    depends on SERVICE_USER_AUTH_ENABLED
+
+endmenu
+
+
+menu "IO configuration"
+
+config RELAY_PIN
+    int "Relay pin"
+    default 32
+
+config BUZZER_PIN
+    int "Buzzer pin"
+    default 16
+
+config BUZZER_PWM
+    bool "Use PWM for buzzer"
+    default false
+
+config READER_BUTTON_PIN
+    int "Reader button pin"
+    default 14
+
+config EXIT_BUTTON_PIN
+    int "Exit button pin"
+    default 13
+
+config READER_UART_NUM
+    int "PN532 reader UART interface number"
+    default 2
+
+config READER_RX_PIN
+    int "PN532 reader serial RX pin"
+    default 36
+
+config READER_TX_PIN
+    int "PN532 reader serial TX pin"
+    default 4
+
+endmenu
+
+
+config DOOR_OPEN_DURATION
+    int "Door open duration"
+    default 3000
+    help
+        Time in ms for how long to keep doors opened after succesfull authentication
 
 endmenu
