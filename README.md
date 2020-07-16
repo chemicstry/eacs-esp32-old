@@ -1,3 +1,5 @@
+# Outdated. This repository is based on old ESP-IDF version. Use [eacs-esp32](https://github.com/chemicstry/eacs-esp32) repository instead.
+
 # eacs-esp32
 Extensible Access Control System. ESP32 based door controller.
 
